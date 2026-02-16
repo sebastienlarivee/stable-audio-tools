@@ -10,6 +10,12 @@ from stable_audio_tools.models import create_model_from_config
 from stable_audio_tools.models.utils import copy_state_dict, load_ckpt_state_dict, remove_weight_norm_from_model
 from stable_audio_tools.training import create_training_wrapper_from_config, create_demo_callback_from_config
 
+# fast kernel mods (these dont work lol)
+# torch.backends.cuda.matmul.allow_tf32 = True
+# torch.backends.cudnn.allow_tf32       = True
+# torch.backends.cudnn.benchmark        = True
+torch.set_float32_matmul_precision("medium") # Added this bc works on 4060
+
 class ExceptionCallback(pl.Callback):
     def on_exception(self, trainer, module, err):
         print(f'{type(err).__name__}: {err}')
