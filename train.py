@@ -27,6 +27,24 @@ class ModelConfigEmbedderCallback(pl.Callback):
     def on_save_checkpoint(self, trainer, pl_module, checkpoint):
         checkpoint["model_config"] = self.model_config
 
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.environ.get(name, None)
+    if raw is None:
+        return default
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name, None)
+    if raw is None or raw == "":
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
 def main():
     torch.multiprocessing.set_sharing_strategy('file_system')
     args = get_all_args()
@@ -92,7 +110,8 @@ def main():
 
     if args.logger == 'wandb':
         logger = pl.loggers.WandbLogger(project=args.name)
-        logger.watch(training_wrapper)
+        if _env_flag("SAO_WANDB_WATCH", True):
+            logger.watch(training_wrapper)
     
         if args.save_dir and isinstance(logger.experiment.id, str):
             checkpoint_dir = os.path.join(args.save_dir, logger.experiment.project, logger.experiment.id, "checkpoints") 
@@ -111,10 +130,19 @@ def main():
     ckpt_callback = pl.callbacks.ModelCheckpoint(every_n_train_steps=args.checkpoint_every, dirpath=checkpoint_dir, save_top_k=-1)
     save_model_config_callback = ModelConfigEmbedderCallback(model_config)
 
-    if args.val_dataset_config:
-        demo_callback = create_demo_callback_from_config(model_config, demo_dl=val_dl)
-    else:
-        demo_callback = create_demo_callback_from_config(model_config, demo_dl=train_dl)
+    disable_demo = _env_flag("SAO_DISABLE_DEMO", False)
+    demo_callback = None
+    if not disable_demo:
+        if args.val_dataset_config:
+            demo_callback = create_demo_callback_from_config(model_config, demo_dl=val_dl)
+        else:
+            demo_callback = create_demo_callback_from_config(model_config, demo_dl=train_dl)
+
+        demo_every_override = _env_int("SAO_DEMO_EVERY_OVERRIDE", 0)
+        if demo_every_override > 0 and hasattr(demo_callback, "demo_every"):
+            demo_callback.demo_every = demo_every_override
+
+    log_every_n_steps = max(1, _env_int("SAO_LOG_EVERY_N_STEPS", 1))
 
     #Combine args and config dicts
     args_dict = vars(args)
@@ -151,6 +179,10 @@ def main():
             "val_check_interval": args.val_every,
         })
 
+    callbacks = [ckpt_callback, exc_callback, save_model_config_callback]
+    if demo_callback is not None:
+        callbacks.insert(1, demo_callback)
+
     trainer = pl.Trainer(
         devices="auto",
         accelerator="gpu",
@@ -158,9 +190,9 @@ def main():
         strategy=strategy,
         precision=args.precision,
         accumulate_grad_batches=args.accum_batches, 
-        callbacks=[ckpt_callback, demo_callback, exc_callback, save_model_config_callback],
+        callbacks=callbacks,
         logger=logger,
-        log_every_n_steps=1,
+        log_every_n_steps=log_every_n_steps,
         max_epochs=10000000,
         default_root_dir=args.save_dir,
         gradient_clip_val=args.gradient_clip_val,
