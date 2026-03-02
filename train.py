@@ -143,6 +143,7 @@ def main():
             demo_callback.demo_every = demo_every_override
 
     log_every_n_steps = max(1, _env_int("SAO_LOG_EVERY_N_STEPS", 1))
+    max_steps = _env_int("SAO_MAX_STEPS", -1)
 
     #Combine args and config dicts
     args_dict = vars(args)
@@ -193,6 +194,7 @@ def main():
         callbacks=callbacks,
         logger=logger,
         log_every_n_steps=log_every_n_steps,
+        max_steps=max_steps,
         max_epochs=10000000,
         default_root_dir=args.save_dir,
         gradient_clip_val=args.gradient_clip_val,
